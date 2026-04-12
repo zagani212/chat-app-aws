@@ -40,7 +40,12 @@
             <div class="msg-bubble">
               <div class="msg-sender">{{ msg.sender }}</div>
               <div class="msg-text">{{ msg.content }}</div>
-              <div class="msg-time">{{ formatTime(msg.timestamp) }}</div>
+              <div class="msg-time">
+                {{ formatTime(msg.timestamp) }}
+                <span v-if="msg.userId === currentUserId" class="msg-status" :title="msg.deliveryStatus || 'sent'">
+                  {{ formatDeliveryStatus(msg.deliveryStatus) }}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -161,16 +166,66 @@ export default {
     const handleDisconnected = () => {}
 
     const handleIncomingMessage = (data) => {
-      if (data.action === 'message' && data.roomId === activeRoom.value?.id) {
+      const incoming = data?.type === 'NEW_MESSAGE' && data?.message ? data.message : data
+
+      if (!incoming?.roomId || !incoming?.content) {
+        return
+      }
+
+      const roomId = incoming.roomId
+      const room = rooms.value.find((r) => r.id === roomId)
+
+      if (!room) {
+        rooms.value.unshift({
+          id: roomId,
+          name: roomId,
+          type: 'direct',
+          unreadCount: 0
+        })
+      }
+
+      const pendingIndex = messages.value.findIndex(
+        (msg) =>
+          msg.roomId === roomId &&
+          msg.deliveryStatus === 'pending' &&
+          msg.content === incoming.content
+      )
+
+      if (pendingIndex !== -1) {
+        const pendingMessage = messages.value[pendingIndex]
+        messages.value[pendingIndex] = {
+          ...pendingMessage,
+          id: incoming.messageId || pendingMessage.id,
+          messageId: incoming.messageId || pendingMessage.messageId,
+          timestamp: incoming.timestamp || pendingMessage.timestamp,
+          deliveryStatus: 'sent'
+        }
+        if (activeRoom.value?.id === roomId) {
+          scrollToBottom()
+        }
+        return
+      }
+
+      if (activeRoom.value?.id === roomId) {
+        if (incoming.messageId && messages.value.some((msg) => msg.id === incoming.messageId)) {
+          return
+        }
+
         messages.value.push({
-          id: data.messageId || Date.now().toString(),
-          roomId: data.roomId,
-          userId: data.userId,
-          sender: data.sender || data.username || 'User',
-          content: data.content,
-          timestamp: data.timestamp || new Date().toISOString()
+          id: incoming.messageId || Date.now().toString(),
+          roomId,
+          userId: incoming.userId || '',
+          sender: incoming.sender || incoming.username || 'User',
+          content: incoming.content,
+          timestamp: incoming.timestamp || new Date().toISOString(),
+          deliveryStatus: 'sent'
         })
         scrollToBottom()
+      } else {
+        const targetRoom = rooms.value.find((r) => r.id === roomId)
+        if (targetRoom) {
+          targetRoom.unreadCount = (targetRoom.unreadCount || 0) + 1
+        }
       }
     }
 
@@ -273,7 +328,12 @@ export default {
         parsedUsers = parseUsersPayload(data)
       }
 
-      if (data?.action === 'message') {
+      if (
+        data?.type === 'NEW_MESSAGE' ||
+        data?.action === 'message' ||
+        data?.type === 'message' ||
+        data?.action === 'sendMessage'
+      ) {
         handleIncomingMessage(data)
       }
 
@@ -323,6 +383,7 @@ export default {
     const selectRoom = (room) => {
       activeRoom.value = room
       messages.value = []
+      room.unreadCount = 0
       websocketService.joinRoom(room.id)
     }
 
@@ -331,12 +392,13 @@ export default {
       if (!content || !activeRoom.value) return
 
       const message = {
-        id: Date.now().toString(),
+        id: `temp-${Date.now()}`,
         roomId: activeRoom.value.id,
         userId: currentUserId.value,
         sender: userInfo.value?.email || 'Anonymous',
         content,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        deliveryStatus: 'pending'
       }
 
       messages.value.push(message)
@@ -396,6 +458,11 @@ export default {
       return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
 
+    const formatDeliveryStatus = (status) => {
+      if (status === 'pending') return '🕒'
+      return '✓✓'
+    }
+
     const formatLastSeen = (date) => {
       if (!date) return '-'
       const d = new Date(date)
@@ -445,6 +512,7 @@ export default {
       openGroupModal,
       requestUsers,
       formatTime,
+      formatDeliveryStatus,
       formatLastSeen
     }
   }
@@ -630,6 +698,16 @@ export default {
   margin-top: 0.2rem;
   font-size: 0.7rem;
   color: #6e7f93;
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.msg-status {
+  color: #4d6a85;
+  font-size: 0.8rem;
+  line-height: 1;
 }
 
 .composer {

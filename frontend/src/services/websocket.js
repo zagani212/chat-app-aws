@@ -93,7 +93,7 @@ class WebSocketService {
   }
 
   sendMessage(roomId, content) {
-    this.send({ action: 'message', roomId, content, timestamp: new Date().toISOString() })
+    this.send({ action: 'sendMessage', roomId, content })
   }
 
   getRooms() {
