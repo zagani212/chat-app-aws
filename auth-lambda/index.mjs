@@ -1,10 +1,10 @@
 // index.mjs
-import { PutCommand, DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { PutCommand, DynamoDBDocumentClient, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { CognitoJwtVerifier } from "aws-jwt-verify";
 
 const client = new DynamoDBClient({ region: process.env.AWS_REGION });
-const db = DynamoDBDocumentClient.from(client);
+const dynamo = DynamoDBDocumentClient.from(client);
 
 export const handler = async (event) => {
     try{
@@ -21,16 +21,30 @@ export const handler = async (event) => {
 
         const payload = await verifier.verify(token);
 
-        const command = new PutCommand({
-            TableName: "Connection",
-            Item: {
-                connectionId: event.requestContext.connectionId,
-                connectedAt: new Date().toISOString(),
-                userId: payload.sub
-            }
-        });
-
-        await db.send(command);
+        await dynamo.send(
+            new PutCommand({
+                TableName: "Connection",
+                Item: {
+                    connectionId: event.requestContext.connectionId,
+                    connectedAt: new Date().toISOString(),
+                    userId: payload.sub
+                }
+            })
+        );
+        await dynamo.send(
+            new UpdateCommand({
+                TableName: "User",
+                Key: { userId: payload.sub },
+                UpdateExpression: "SET #s = :s",
+                ExpressionAttributeNames: {
+                    "#s": "status"
+                },
+                ExpressionAttributeValues: {
+                    ":s": "ONLINE",
+                },
+            })
+        );
+        
         return {
             statusCode: 200,
             body: "Connected"
