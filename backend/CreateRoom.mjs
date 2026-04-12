@@ -28,15 +28,14 @@ export const handler = async (event) => {
     })
   );
 
+  const userIds = [connectedUser.Item.userId, ...body.userIds]
+
   // 2. Get participants
   const { Responses } = await dynamo.send(
     new BatchGetCommand({
       RequestItems: {
         User: {
-          Keys: [
-            { userId: connectedUser.Item.userId },
-            { userId: body.targetUserId }
-          ]
+          Keys: userIds.map((userId) => ({userId})) 
         }
       }
     })
@@ -46,10 +45,11 @@ export const handler = async (event) => {
 
   try {
     const roomId = randomUUID()
-    const roomKey = [connectedUser.Item.userId, body.targetUserId].sort().join("#")
+    const roomKey = userIds.sort().join("#")
     const room = {
       roomKey,
       roomId,
+      type: userIds.length > 2 ? 'GROUP' : 'DIRECT',
       participants,
       createdAt: new Date().toISOString(),
     };

@@ -99,12 +99,19 @@ class WebSocketService {
   getRooms() {
     this.send({ action: 'getRooms' })
   }
+
   createRoom(targetUserId) {
-    this.send({ action: 'createRoom', targetUserId })
+    this.send({
+      action: 'createRoom',
+      userIds: targetUserId ? [targetUserId] : []
+    })
   }
 
   createGroupRoom(name, userIds) {
-    this.send({ action: 'createGroupRoom', name, userIds })
+    this.send({
+      action: 'createRoom',
+      userIds: Array.isArray(userIds) ? userIds : []
+    })
   }
 
   on(event, callback) {
