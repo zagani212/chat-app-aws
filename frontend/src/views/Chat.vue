@@ -13,6 +13,7 @@
         >
           <div class="discussion-name">{{ room.name }}</div>
           <div class="discussion-meta">{{ room.type === 'group' ? 'Group' : 'Direct' }}</div>
+          <span v-if="room.unreadCount > 0" class="discussion-badge">{{ room.unreadCount }}</span>
         </button>
       </div>
     </aside>
@@ -120,18 +121,23 @@ export default {
     const rooms = ref([])
     const activeRoom = ref(null)
     const messages = ref([])
+    const messagesByRoom = ref({})
     const messageInput = ref('')
     const showDirectModal = ref(false)
     const showGroupModal = ref(false)
     const newGroupName = ref('')
     const selectedGroupUsers = ref([])
     const isCreatingDirectRoom = ref(false)
+    const isCreatingGroupRoom = ref(false)
     const pendingDirectTargetUserId = ref('')
     const messagesContainer = ref(null)
     const users = ref([])
 
     const userInfo = computed(() => authService.getUserInfo())
-    const currentUserId = computed(() => userInfo.value?.sub || '')
+    const currentUserId = computed(() => userInfo.value?.sub || userInfo.value?.userId || '')
+    const currentUsername = computed(
+      () => userInfo.value?.username || userInfo.value?.['cognito:username'] || userInfo.value?.name || 'You'
+    )
 
     const parseUsersPayload = (payload) => {
       if (Array.isArray(payload)) return payload
@@ -150,6 +156,10 @@ export default {
       websocketService.listUsers()
     }
 
+    const requestMessages = () => {
+      websocketService.getMessages()
+    }
+
     const scrollToBottom = () => {
       nextTick(() => {
         if (messagesContainer.value) {
@@ -158,15 +168,79 @@ export default {
       })
     }
 
+    const getRoomMessages = (roomId) => {
+      if (!messagesByRoom.value[roomId]) {
+        messagesByRoom.value[roomId] = []
+      }
+      return messagesByRoom.value[roomId]
+    }
+
+    const sortMessagesByTimestamp = (list) => {
+      return [...list].sort((a, b) => {
+        const aTime = new Date(a?.timestamp || 0).getTime()
+        const bTime = new Date(b?.timestamp || 0).getTime()
+        return aTime - bTime
+      })
+    }
+
+    const sortRoomMessages = (roomId) => {
+      const sorted = sortMessagesByTimestamp(getRoomMessages(roomId))
+      messagesByRoom.value[roomId] = sorted
+      return sorted
+    }
+
+    const syncActiveRoomMessages = (roomId) => {
+      if (activeRoom.value?.id === roomId) {
+        messages.value = [...sortRoomMessages(roomId)]
+      }
+    }
+
+    const resolveSenderName = (payload, senderId) => {
+      const senderObject = payload?.sender && typeof payload.sender === 'object' ? payload.sender : null
+      const senderString = typeof payload?.sender === 'string' ? payload.sender : ''
+      const knownUser = users.value.find((user) => user.userId === senderId)
+
+      if (senderObject?.username) return senderObject.username
+      if (payload?.username) return payload.username
+      if (payload?.senderUsername) return payload.senderUsername
+      if (senderString) return senderString
+      if (knownUser?.username) return knownUser.username
+      if (senderId && senderId === currentUserId.value) return currentUsername.value
+      return 'User'
+    }
+
+    const resolveSenderId = (payload) => {
+      if (!payload || typeof payload !== 'object') return ''
+      if (payload.userId) return payload.userId
+      if (payload.senderId) return payload.senderId
+      if (payload.sender && typeof payload.sender === 'object') {
+        return payload.sender.userId || payload.sender.id || payload.sender.sub || ''
+      }
+      return ''
+    }
+
     const handleConnected = () => {
       requestUsers()
-      
+      requestMessages()
     }
 
     const handleDisconnected = () => {}
 
     const handleIncomingMessage = (data) => {
       const incoming = data?.type === 'NEW_MESSAGE' && data?.message ? data.message : data
+      let incomingUserId = resolveSenderId(incoming)
+
+      if (!incomingUserId) {
+        const incomingSenderName =
+          incoming?.username ||
+          incoming?.senderUsername ||
+          (incoming?.sender && typeof incoming.sender === 'object' ? incoming.sender.username : '') ||
+          (typeof incoming?.sender === 'string' ? incoming.sender : '')
+
+        if (incomingSenderName && incomingSenderName === currentUsername.value) {
+          incomingUserId = currentUserId.value
+        }
+      }
 
       if (!incoming?.roomId || !incoming?.content) {
         return
@@ -184,7 +258,9 @@ export default {
         })
       }
 
-      const pendingIndex = messages.value.findIndex(
+      const roomMessages = getRoomMessages(roomId)
+
+      const pendingIndex = roomMessages.findIndex(
         (msg) =>
           msg.roomId === roomId &&
           msg.deliveryStatus === 'pending' &&
@@ -192,14 +268,16 @@ export default {
       )
 
       if (pendingIndex !== -1) {
-        const pendingMessage = messages.value[pendingIndex]
-        messages.value[pendingIndex] = {
+        const pendingMessage = roomMessages[pendingIndex]
+        roomMessages[pendingIndex] = {
           ...pendingMessage,
           id: incoming.messageId || pendingMessage.id,
           messageId: incoming.messageId || pendingMessage.messageId,
           timestamp: incoming.timestamp || pendingMessage.timestamp,
           deliveryStatus: 'sent'
         }
+        sortRoomMessages(roomId)
+        syncActiveRoomMessages(roomId)
         if (activeRoom.value?.id === roomId) {
           scrollToBottom()
         }
@@ -207,25 +285,115 @@ export default {
       }
 
       if (activeRoom.value?.id === roomId) {
-        if (incoming.messageId && messages.value.some((msg) => msg.id === incoming.messageId)) {
+        if (incoming.messageId && roomMessages.some((msg) => msg.id === incoming.messageId)) {
           return
         }
 
-        messages.value.push({
+        roomMessages.push({
           id: incoming.messageId || Date.now().toString(),
           roomId,
-          userId: incoming.userId || '',
-          sender: incoming.sender || incoming.username || 'User',
+          userId: incomingUserId,
+          sender: resolveSenderName(incoming, incomingUserId),
           content: incoming.content,
           timestamp: incoming.timestamp || new Date().toISOString(),
           deliveryStatus: 'sent'
         })
+        sortRoomMessages(roomId)
+        syncActiveRoomMessages(roomId)
         scrollToBottom()
       } else {
+        if (incoming.messageId && roomMessages.some((msg) => msg.id === incoming.messageId)) {
+          return
+        }
+        roomMessages.push({
+          id: incoming.messageId || Date.now().toString(),
+          roomId,
+          userId: incomingUserId,
+          sender: resolveSenderName(incoming, incomingUserId),
+          content: incoming.content,
+          timestamp: incoming.timestamp || new Date().toISOString(),
+          deliveryStatus: 'sent'
+        })
+        sortRoomMessages(roomId)
         const targetRoom = rooms.value.find((r) => r.id === roomId)
         if (targetRoom) {
           targetRoom.unreadCount = (targetRoom.unreadCount || 0) + 1
         }
+      }
+    }
+
+    const normalizeMessagesPayload = (payload) => {
+      if (Array.isArray(payload)) return payload
+      if (typeof payload === 'string') {
+        try {
+          const parsed = JSON.parse(payload)
+          return Array.isArray(parsed) ? parsed : []
+        } catch {
+          return []
+        }
+      }
+      return []
+    }
+
+    const handleMessagesFetched = (payload) => {
+      const incomingMessages = normalizeMessagesPayload(
+        payload?.messages || payload?.data || payload?.body || payload?.payload || payload
+      )
+
+      if (!incomingMessages.length) return
+
+      incomingMessages.forEach((message) => {
+        if (!message?.roomId || !message?.content) return
+        let messageUserId = resolveSenderId(message)
+
+        if (!messageUserId) {
+          const fetchedSenderName =
+            message?.username ||
+            message?.senderUsername ||
+            (message?.sender && typeof message.sender === 'object' ? message.sender.username : '') ||
+            (typeof message?.sender === 'string' ? message.sender : '')
+
+          if (fetchedSenderName && fetchedSenderName === currentUsername.value) {
+            messageUserId = currentUserId.value
+          }
+        }
+
+        if (!rooms.value.some((room) => room.id === message.roomId)) {
+          rooms.value.unshift({
+            id: message.roomId,
+            name: message.roomId,
+            type: 'direct',
+            unreadCount: 0
+          })
+        }
+
+        const roomMessages = getRoomMessages(message.roomId)
+        const messageId = message.messageId || message.id
+
+        if (messageId && roomMessages.some((existing) => existing.id === messageId)) {
+          return
+        }
+
+        roomMessages.push({
+          id: messageId || Date.now().toString(),
+          roomId: message.roomId,
+          userId: messageUserId,
+          sender: resolveSenderName(message, messageUserId),
+          content: message.content,
+          timestamp: message.timestamp || new Date().toISOString(),
+          deliveryStatus: messageUserId === currentUserId.value ? 'sent' : 'sent'
+        })
+        sortRoomMessages(message.roomId)
+      })
+
+      if (!activeRoom.value && rooms.value.length > 0) {
+        const preferredRoom = rooms.value.find((room) => getRoomMessages(room.id).length > 0) || rooms.value[0]
+        activeRoom.value = preferredRoom
+      }
+
+      if (activeRoom.value?.id) {
+        syncActiveRoomMessages(activeRoom.value.id)
+        scrollToBottom()
       }
     }
 
@@ -256,24 +424,36 @@ export default {
         return
       }
 
+      const isGroupRoom =
+        room?.type === 'GROUP' ||
+        room?.type === 'group' ||
+        participants.length > 2 ||
+        Boolean(room?.name)
+
       const targetId = participantIds.find((id) => id !== currentUserId.value) || pendingDirectTargetUserId.value
       const targetUser = users.value.find((user) => user.userId === targetId)
-      const roomName = targetUser?.username || room.roomKey || 'Direct chat'
+      const roomName = isGroupRoom
+        ? room?.name || room?.roomKey || 'Group chat'
+        : targetUser?.username || room?.roomKey || 'Direct chat'
 
       if (!rooms.value.some((existingRoom) => existingRoom.id === room.roomId)) {
         rooms.value.unshift({
           id: room.roomId,
           name: roomName,
-          type: 'direct',
+          type: isGroupRoom ? 'group' : 'direct',
           unreadCount: 0
         })
       }
 
       activeRoom.value = rooms.value.find((existingRoom) => existingRoom.id === room.roomId)
-      messages.value = []
+      messages.value = [...sortRoomMessages(room.roomId)]
       showDirectModal.value = false
+      showGroupModal.value = false
       isCreatingDirectRoom.value = false
+      isCreatingGroupRoom.value = false
       pendingDirectTargetUserId.value = ''
+      newGroupName.value = ''
+      selectedGroupUsers.value = []
     }
 
     const handleGetRoomsResponse = (payload) => {
@@ -309,6 +489,12 @@ export default {
             unreadCount: room.unreadCount || 0
           }
         })
+
+      if (!activeRoom.value && rooms.value.length > 0) {
+        const preferredRoom = rooms.value.find((room) => getRoomMessages(room.id).length > 0) || rooms.value[0]
+        activeRoom.value = preferredRoom
+        messages.value = [...getRoomMessages(preferredRoom.id)]
+      }
     }
 
     const handleSocketMessage = (data) => {
@@ -335,6 +521,13 @@ export default {
         data?.action === 'sendMessage'
       ) {
         handleIncomingMessage(data)
+      }
+
+      if (
+        data && typeof data === 'object' &&
+        (data.type === 'MESSAGES_FETCHED' || data.action === 'MESSAGES_FETCHED' || data.method === 'MESSAGES_FETCHED' || data.messages)
+      ) {
+        handleMessagesFetched(data)
       }
 
       if (data && typeof data === 'object') {
@@ -382,9 +575,8 @@ export default {
 
     const selectRoom = (room) => {
       activeRoom.value = room
-      messages.value = []
+      messages.value = [...sortRoomMessages(room.id)]
       room.unreadCount = 0
-      websocketService.joinRoom(room.id)
     }
 
     const sendMessage = () => {
@@ -395,13 +587,15 @@ export default {
         id: `temp-${Date.now()}`,
         roomId: activeRoom.value.id,
         userId: currentUserId.value,
-        sender: userInfo.value?.email || 'Anonymous',
+        sender: currentUsername.value,
         content,
         timestamp: new Date().toISOString(),
         deliveryStatus: 'pending'
       }
 
-      messages.value.push(message)
+      getRoomMessages(activeRoom.value.id).push(message)
+      sortRoomMessages(activeRoom.value.id)
+      syncActiveRoomMessages(activeRoom.value.id)
       messageInput.value = ''
       websocketService.sendMessage(activeRoom.value.id, content)
       scrollToBottom()
@@ -415,22 +609,11 @@ export default {
     }
 
     const createGroupRoom = () => {
+      if (isCreatingGroupRoom.value) return
       if (!newGroupName.value.trim() || selectedGroupUsers.value.length === 0) return
 
-      const roomId = `group-${Date.now()}`
-      rooms.value.unshift({
-        id: roomId,
-        name: newGroupName.value.trim(),
-        type: 'group',
-        unreadCount: 0
-      })
-
+      isCreatingGroupRoom.value = true
       websocketService.createGroupRoom(newGroupName.value.trim(), selectedGroupUsers.value)
-      activeRoom.value = rooms.value[0]
-      messages.value = []
-      newGroupName.value = ''
-      selectedGroupUsers.value = []
-      showGroupModal.value = false
     }
 
     const leaveRoom = () => {
@@ -557,6 +740,7 @@ export default {
   background: #fff;
   padding: 0.85rem 1rem;
   cursor: pointer;
+  position: relative;
 }
 
 .discussion-item:hover {
@@ -576,6 +760,24 @@ export default {
   margin-top: 0.25rem;
   font-size: 0.78rem;
   color: #64748b;
+}
+
+.discussion-badge {
+  position: absolute;
+  right: 0.85rem;
+  top: 50%;
+  transform: translateY(-50%);
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #25d366;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.35rem;
 }
 
 .chat-main {

@@ -84,12 +84,8 @@ class WebSocketService {
     this.send({ action: 'listUsers' })
   }
 
-  joinRoom(roomId) {
-    this.send({ action: 'join', roomId })
-  }
-
   leaveRoom(roomId) {
-    this.send({ action: 'leave', roomId })
+    this.send({ action: 'leaveRoom', roomId })
   }
 
   sendMessage(roomId, content) {
@@ -98,6 +94,10 @@ class WebSocketService {
 
   getRooms() {
     this.send({ action: 'getRooms' })
+  }
+
+  getMessages() {
+    this.send({ action: 'getMessages' })
   }
 
   createRoom(targetUserId) {
@@ -110,6 +110,7 @@ class WebSocketService {
   createGroupRoom(name, userIds) {
     this.send({
       action: 'createRoom',
+      name,
       userIds: Array.isArray(userIds) ? userIds : []
     })
   }
