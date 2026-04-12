@@ -20,17 +20,11 @@ export const handler = async (event) => {
   try {
 
     const { roomId, content } = JSON.parse(event.body);
-
-    const message = {
-      roomId,
-      messageId: randomUUID(),
-      content,
-      timestamp: new Date().toISOString()
-    }
-    await dynamo.send(
-      new PutCommand({
-        TableName: "Message",
-        Item: message
+    const connectionId = event.requestContext.connectionId
+    const connectedUser = await dynamo.send(
+      new GetCommand({
+        TableName: "Connection",
+        Key: { connectionId }
       })
     );
 
@@ -46,6 +40,23 @@ export const handler = async (event) => {
     );
     const roomInfo = Items[0]
     console.log(roomInfo)
+
+    const message = {
+      roomId,
+      senderId: connectedUser.userId,
+      roomKey: roomInfo.roomKey,
+      messageId: randomUUID(),
+      content,
+      timestamp: new Date().toISOString()
+    }
+    await dynamo.send(
+      new PutCommand({
+        TableName: "Message",
+        Item: message
+      })
+    );
+
+    
     const participants = roomInfo.participants;
     const apiClient = new ApiGatewayManagementApiClient({
       endpoint: `https://${event.requestContext.domainName}/${event.requestContext.stage}`

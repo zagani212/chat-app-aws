@@ -18,7 +18,7 @@ const client = new DynamoDBClient({ region: process.env.AWS_REGION });
 const dynamo = DynamoDBDocumentClient.from(client);
 
 export const handler = async (event) => {
-  const body = JSON.parse(event.body);
+  const {body} = JSON.parse(event.body);
 
   // 1. Get current user
   const connectedUser = await dynamo.send(
@@ -49,6 +49,7 @@ export const handler = async (event) => {
     const room = {
       roomKey,
       roomId,
+      name: body.name,
       type: userIds.length > 2 ? 'GROUP' : 'DIRECT',
       participants,
       createdAt: new Date().toISOString(),
