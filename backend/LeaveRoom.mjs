@@ -17,9 +17,9 @@ const dynamo = DynamoDBDocumentClient.from(client);
 
 export const handler = async (event) => {
   const { roomId } = JSON.parse(event.body);
-
+  console.log(roomId)
   const connectionId = event.requestContext.connectionId
-  const connectedUser = await dynamo.send(
+  const { Item: connectedUser } = await dynamo.send(
     new GetCommand({
       TableName: "Connection",
       Key: { connectionId }
@@ -39,15 +39,28 @@ export const handler = async (event) => {
   console.log(Items)
   const room = Items[0]
   console.log(room)
-  room.participants.filter((p) => p !== connectedUser.userid)
-  if (room.participants.length <= 1) {
+  console.log(connectedUser.userId)
+  const participants = room.participants.filter((p) => p.userId !== connectedUser.userId)
+  console.log(participants)
+  if (participants.length <= 1) {
+    console.log("Let s delete the chat room")
     await dynamo.send(
       new DeleteCommand({
         TableName: "ChatRoom",
         Key: { roomKey: room.roomKey },
       })
     )
+    await dynamo.send(
+      new DeleteCommand({
+        TableName: "UserRoom",
+        Key: {
+          userId: participants[0].userId,
+          roomKey: room.roomKey
+        }
+      })
+    )
   } else {
+    console.log("Let s edit the chat room")
     await dynamo.send(
       new PutCommand({
         TableName: "ChatRoom",
@@ -55,6 +68,22 @@ export const handler = async (event) => {
       })
     )
   }
+
+  console.log('Here')
+  console.log(connectedUser)
+  console.log({
+    PK: { S: connectedUser.userId },
+    SK: { S: room.roomKey }
+  })
+  await dynamo.send(
+    new DeleteCommand({
+      TableName: "UserRoom",
+      Key: {
+        userId: connectedUser.userId,
+        roomKey: room.roomKey
+      }
+    })
+  )
 
   const apiClient = new ApiGatewayManagementApiClient({
     endpoint: `https://${event.requestContext.domainName}/${event.requestContext.stage}`
@@ -82,7 +111,7 @@ export const handler = async (event) => {
             new PostToConnectionCommand({
               ConnectionId: conn.connectionId,
               Data: Buffer.from(JSON.stringify({
-                type: "ROOM_DELETED",
+                type: "ROOM_LEFT",
                 room
               }))
             })
