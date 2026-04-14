@@ -456,6 +456,21 @@ export default {
       selectedGroupUsers.value = []
     }
 
+    const handleRoomLeftResponse = (payload) => {
+      const room = payload?.room || payload
+      const roomId = room?.roomId || room?.id
+
+      if (!roomId) return
+
+      rooms.value = rooms.value.filter((existingRoom) => existingRoom.id !== roomId)
+      delete messagesByRoom.value[roomId]
+
+      if (activeRoom.value?.id === roomId) {
+        activeRoom.value = rooms.value[0] || null
+        messages.value = activeRoom.value ? [...sortRoomMessages(activeRoom.value.id)] : []
+      }
+    }
+
     const handleGetRoomsResponse = (payload) => {
       const incomingRooms = Array.isArray(payload?.rooms)
         ? payload.rooms
@@ -541,6 +556,19 @@ export default {
           data.room
         ) {
           handleCreateRoomResponse(data)
+        }
+      }
+
+      if (data && typeof data === 'object') {
+        if (
+          data.type === 'ROOM_LEFT' ||
+          data.action === 'ROOM_LEFT' ||
+          data.method === 'ROOM_LEFT' ||
+          data.type === 'roomLeft' ||
+          data.action === 'roomLeft' ||
+          data.method === 'roomLeft'
+        ) {
+          handleRoomLeftResponse(data)
         }
       }
 
@@ -660,8 +688,7 @@ export default {
 
       try {
         await websocketService.connect(currentUserId.value)
-        console.log(websocketService)
-        websocketService.getRooms()  // ← Nouveau
+        websocketService.getRooms()
       } catch (error) {
         console.error('Failed to connect to WebSocket:', error)
       }
