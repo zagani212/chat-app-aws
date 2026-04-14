@@ -6,10 +6,7 @@ import {
   QueryCommand
 } from "@aws-sdk/lib-dynamodb";
 
-import {
-  ApiGatewayManagementApiClient,
-  PostToConnectionCommand
-} from "@aws-sdk/client-apigatewaymanagementapi";
+import { createApiClient, postToConnections } from "/opt/nodejs/PostToConnection.mjs";
 
 import { randomUUID } from "crypto";
 
@@ -21,13 +18,19 @@ export const handler = async (event) => {
 
     const { roomId, content } = JSON.parse(event.body);
     const connectionId = event.requestContext.connectionId
-    const connectedUser = await dynamo.send(
+    const { Item } = await dynamo.send(
       new GetCommand({
         TableName: "Connection",
         Key: { connectionId }
       })
     );
-
+    const { Item: connectedUser } = await dynamo.send(
+      new GetCommand({
+        TableName: "User",
+        Key: { userId: Item.userId }
+      })
+    );
+    console.log(connectedUser)
     const { Items } = await dynamo.send(
       new QueryCommand({
         TableName: "ChatRoom",
@@ -43,12 +46,13 @@ export const handler = async (event) => {
 
     const message = {
       roomId,
-      senderId: connectedUser.userId,
+      sender: connectedUser,
       roomKey: roomInfo.roomKey,
       messageId: randomUUID(),
       content,
       timestamp: new Date().toISOString()
     }
+    console.log(message)
     await dynamo.send(
       new PutCommand({
         TableName: "Message",
@@ -56,11 +60,9 @@ export const handler = async (event) => {
       })
     );
 
-    
+
     const participants = roomInfo.participants;
-    const apiClient = new ApiGatewayManagementApiClient({
-      endpoint: `https://${event.requestContext.domainName}/${event.requestContext.stage}`
-    });
+    const apiClient = createApiClient(event);
     await Promise.all(
       participants.map(async (p) => {
         console.log("participant: ", p)
@@ -75,21 +77,10 @@ export const handler = async (event) => {
           })
         );
         console.log(Items)
-        await Promise.all(
-          Items.map(async (conn) => {
-            console.log("let's send back the message to the users")
-            console.log(conn.connectionId)
-            await apiClient.send(
-              new PostToConnectionCommand({
-                ConnectionId: conn.connectionId,
-                Data: Buffer.from(JSON.stringify({
-                  type: "NEW_MESSAGE",
-                  message
-                }))
-              })
-            );
-          })
-        )
+        await postToConnections(apiClient, Items, {
+          type: "NEW_MESSAGE",
+          message
+        });
 
       })
     )

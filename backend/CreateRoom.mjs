@@ -7,10 +7,7 @@ import {
   QueryCommand
 } from "@aws-sdk/lib-dynamodb";
 
-import {
-  ApiGatewayManagementApiClient,
-  PostToConnectionCommand
-} from "@aws-sdk/client-apigatewaymanagementapi";
+import { createApiClient, postToConnections } from "/opt/nodejs/PostToConnection.mjs";
 
 import { randomUUID } from "crypto";
 
@@ -18,7 +15,7 @@ const client = new DynamoDBClient({ region: process.env.AWS_REGION });
 const dynamo = DynamoDBDocumentClient.from(client);
 
 export const handler = async (event) => {
-  const {body} = JSON.parse(event.body);
+  const body = JSON.parse(event.body);
 
   // 1. Get current user
   const connectedUser = await dynamo.send(
@@ -27,15 +24,13 @@ export const handler = async (event) => {
       Key: { connectionId: event.requestContext.connectionId }
     })
   );
-
   const userIds = [connectedUser.Item.userId, ...body.userIds]
-
   // 2. Get participants
   const { Responses } = await dynamo.send(
     new BatchGetCommand({
       RequestItems: {
         User: {
-          Keys: userIds.map((userId) => ({userId})) 
+          Keys: userIds.map((userId) => ({ userId }))
         }
       }
     })
@@ -63,9 +58,7 @@ export const handler = async (event) => {
       })
     );
 
-    const apiClient = new ApiGatewayManagementApiClient({
-      endpoint: `https://${event.requestContext.domainName}/${event.requestContext.stage}`
-    });
+    const apiClient = createApiClient(event);
 
     // 4. Notify ALL users
     await Promise.all(
@@ -93,34 +86,16 @@ export const handler = async (event) => {
         if (!Items) return;
 
         // 5. Send to ALL connections of user
-        await Promise.all(
-          Items.map(async (conn) => {
-            try {
-              await apiClient.send(
-                new PostToConnectionCommand({
-                  ConnectionId: conn.connectionId,
-                  Data: Buffer.from(JSON.stringify({
-                    type: "ROOM_CREATED",
-                    room
-                  }))
-                })
-              );
-            } catch (err) {
-              // handle stale connections
-              if (err.statusCode === 410) {
-                console.log("Stale connection:", conn.connectionId);
-              } else {
-                throw err;
-              }
-            }
-          })
-        );
+        await postToConnections(apiClient, Items, {
+          type: "ROOM_CREATED",
+          room
+        });
       })
     );
 
   } catch (err) {
     if (err.name === "ConditionalCheckFailedException") {
-      console.log("Room already exists");
+      console.log("Room already exists", err);
     } else {
       throw err;
     }

@@ -4,20 +4,63 @@ import {
   DeleteCommand,
   PutCommand,
   GetCommand,
+  BatchWriteCommand,
   QueryCommand
 } from "@aws-sdk/lib-dynamodb";
 
-import {
-  ApiGatewayManagementApiClient,
-  PostToConnectionCommand
-} from "@aws-sdk/client-apigatewaymanagementapi";
+import { createApiClient, postToConnections } from "/opt/nodejs/PostToConnection.mjs";
 
 const client = new DynamoDBClient({ region: process.env.AWS_REGION });
 const dynamo = DynamoDBDocumentClient.from(client);
 
+const deleteRommMessages = async (roomKey) => {
+  const result = await dynamo.send(
+    new QueryCommand({
+      TableName: "Message",
+      KeyConditionExpression: "roomKey = :rk",
+      ExpressionAttributeValues: {
+        ":rk": roomKey
+      }
+    })
+  );
+  if (!result.Items || !result.Items.length) return;
+  const deleteRequests = result.Items.map(item => ({
+    DeleteRequest: {
+      Key: {
+        roomKey: item.roomKey,
+        messageId: item.messageId
+      }
+    }
+  }));
+  await dynamo.send(
+    new BatchWriteCommand({
+      RequestItems: {
+        Message: deleteRequests
+      }
+    })
+  );
+}
+
+const deleteRoom = async (roomKey, userId) => {
+  await dynamo.send(
+    new DeleteCommand({
+      TableName: "ChatRoom",
+      Key: { roomKey },
+    })
+  )
+  await dynamo.send(
+    new DeleteCommand({
+      TableName: "UserRoom",
+      Key: {
+        userId,
+        roomKey
+      }
+    })
+  )
+}
+
 export const handler = async (event) => {
   const { roomId } = JSON.parse(event.body);
-  console.log(roomId)
   const connectionId = event.requestContext.connectionId
   const { Item: connectedUser } = await dynamo.send(
     new GetCommand({
@@ -36,31 +79,14 @@ export const handler = async (event) => {
       }
     })
   );
-  console.log(Items)
   const room = Items[0]
-  console.log(room)
-  console.log(connectedUser.userId)
+  let ROOM_IS_DELETED = false
   const participants = room.participants.filter((p) => p.userId !== connectedUser.userId)
-  console.log(participants)
   if (participants.length <= 1) {
-    console.log("Let s delete the chat room")
-    await dynamo.send(
-      new DeleteCommand({
-        TableName: "ChatRoom",
-        Key: { roomKey: room.roomKey },
-      })
-    )
-    await dynamo.send(
-      new DeleteCommand({
-        TableName: "UserRoom",
-        Key: {
-          userId: participants[0].userId,
-          roomKey: room.roomKey
-        }
-      })
-    )
+    await deleteRoom(room.roomKey, participants[0].userId)
+    await deleteRommMessages(room.roomKey)
+    ROOM_IS_DELETED = true
   } else {
-    console.log("Let s edit the chat room")
     await dynamo.send(
       new PutCommand({
         TableName: "ChatRoom",
@@ -69,12 +95,6 @@ export const handler = async (event) => {
     )
   }
 
-  console.log('Here')
-  console.log(connectedUser)
-  console.log({
-    PK: { S: connectedUser.userId },
-    SK: { S: room.roomKey }
-  })
   await dynamo.send(
     new DeleteCommand({
       TableName: "UserRoom",
@@ -85,9 +105,8 @@ export const handler = async (event) => {
     })
   )
 
-  const apiClient = new ApiGatewayManagementApiClient({
-    endpoint: `https://${event.requestContext.domainName}/${event.requestContext.stage}`
-  });
+  const apiClient = createApiClient(event);
+
 
   await Promise.all(
     room.participants.map(async (user) => {
@@ -104,21 +123,10 @@ export const handler = async (event) => {
 
       if (!Items) return;
 
-      // 5. Send to ALL connections of user
-      await Promise.all(
-        Items.map(async (conn) => {
-          await apiClient.send(
-            new PostToConnectionCommand({
-              ConnectionId: conn.connectionId,
-              Data: Buffer.from(JSON.stringify({
-                type: "ROOM_LEFT",
-                room
-              }))
-            })
-          );
-        })
-      );
-
+      await postToConnections(apiClient, Items, {
+        type: ROOM_IS_DELETED ? "ROOM_DELETED" : "ROOM_LEFT",
+        room
+      });
     })
   );
 }

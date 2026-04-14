@@ -1,9 +1,7 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { ScanCommand } from "@aws-sdk/lib-dynamodb";
-import {
-    ApiGatewayManagementApiClient,
-    PostToConnectionCommand
-} from "@aws-sdk/client-apigatewaymanagementapi";
+
+import { createApiClient, postToConnections } from "/opt/nodejs/PostToConnection.mjs";
 
 const dynamo = new DynamoDBClient({ region: process.env.AWS_REGION });
 
@@ -19,16 +17,9 @@ export const handler = async (event) => {
 
         const connectionId = event.requestContext.connectionId;
 
-        const apiClient = new ApiGatewayManagementApiClient({
-            endpoint: `https://${event.requestContext.domainName}/${event.requestContext.stage}`
-        });
+        const apiClient = createApiClient(event);
 
-        await apiClient.send(
-            new PostToConnectionCommand({
-                ConnectionId: connectionId,
-                Data: Buffer.from(JSON.stringify(users))
-            })
-        );
+        await postToConnections(apiClient, [{connectionId}],users);
 
         return { statusCode: 200 };
 

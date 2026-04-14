@@ -1,9 +1,6 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
-import {
-  ApiGatewayManagementApiClient,
-  PostToConnectionCommand
-} from "@aws-sdk/client-apigatewaymanagementapi";
+import { createApiClient, postToConnections } from "/opt/nodejs/PostToConnection.mjs";
 
 const dynamo = new DynamoDBClient({ region: process.env.AWS_REGION });
 
@@ -29,13 +26,13 @@ export const handler = async (event) => {
       })
     );
 
-    console.log(roomKeys)
-
     const rooms = []
 
+    console.log(roomKeys)
+
     await Promise.all(
-      roomKeys.items.map(async (room) => {
-        const {Item} = await dynamo.send(
+      roomKeys.Items.map(async (room) => {
+        const { Item } = await dynamo.send(
           new GetCommand({
             TableName: "ChatRoom",
             Key: { roomKey: room.roomKey }
@@ -47,20 +44,11 @@ export const handler = async (event) => {
 
     console.log(rooms)
 
-    const apiClient = new ApiGatewayManagementApiClient({
-      endpoint: `https://${event.requestContext.domainName}/${event.requestContext.stage}`
+    const apiClient = createApiClient(event);
+    await postToConnections(apiClient, [{ connectionId }], {
+      type: "ROOMS_FETCHED",
+      rooms
     });
-
-    await apiClient.send(
-      new PostToConnectionCommand({
-        ConnectionId: connectionId,
-        Data: Buffer.from(JSON.stringify({
-          type: "ROOMS_FETCHED",
-          rooms
-        }))
-      })
-    );
-
     return { statusCode: 200 };
 
   } catch (error) {

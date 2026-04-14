@@ -1,16 +1,14 @@
 // index.mjs
 import { DeleteCommand, DynamoDBDocumentClient, QueryCommand, UpdateCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import {
-    ApiGatewayManagementApiClient,
-    PostToConnectionCommand
-} from "@aws-sdk/client-apigatewaymanagementapi";
+import { createApiClient, postToConnections } from "/opt/nodejs/PostToConnection.mjs";
+
 const client = new DynamoDBClient({ region: process.env.AWS_REGION });
 const dynamo = DynamoDBDocumentClient.from(client);
 
 export const handler = async (event) => {
     const connectionId = event.requestContext?.connectionId;
-
+    console.log("let's delete the connection id == ", connectionId)
     const { Attributes: connection } = await dynamo.send(
         new DeleteCommand({
             TableName: "Connection",
@@ -55,24 +53,16 @@ export const handler = async (event) => {
                 TableName: "Connection"
             })
         );
-        const apiClient = new ApiGatewayManagementApiClient({
-            endpoint: `https://${event.requestContext.domainName}/${event.requestContext.stage}`
-        });
-        await Promise.all(
-            result.Items.map(async (conn) => {
-                console.log("Send notification to users")
-                await apiClient.send(
-                    new PostToConnectionCommand({
-                        ConnectionId: conn.connectionId,
-                        Data: Buffer.from(JSON.stringify({
-                            type: "USER_OFFLINE",
-                            data: { userId: connection.userId }
-                        }))
-                    })
-                );
-            })
-        )
 
+        console.log("all connections are : ")
+        console.log(result.Items)
+
+        const apiClient = createApiClient(event);
+
+        await postToConnections(apiClient, Items, {
+            type: "USER_OFFLINE",
+            data: { userId: connection.userId }
+        });
 
     }
 };
