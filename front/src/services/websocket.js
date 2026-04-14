@@ -92,6 +92,14 @@ class WebSocketService {
     this.send({ action: 'sendMessage', roomId, content })
   }
 
+  isTyping(roomId, isTyping) {
+    this.send({
+      action: 'isTyping',
+      roomId,
+      isTyping
+    })
+  }
+
   getRooms() {
     this.send({ action: 'getRooms' })
   }

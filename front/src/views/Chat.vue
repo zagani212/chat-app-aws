@@ -52,10 +52,17 @@
         </div>
 
         <div class="composer">
+          <div v-if="activeRoomIsRemoteTyping" class="typing-indicator">
+            <span>Typing</span>
+            <span class="typing-dots">
+              <i></i><i></i><i></i>
+            </span>
+          </div>
           <input
             v-model="messageInput"
             class="composer-input"
             placeholder="Type a message..."
+            @input="handleTyping"
             @keyup.enter="sendMessage"
           />
           <button @click="sendMessage" class="btn btn-send" :disabled="!messageInput.trim()">Send</button>
@@ -130,14 +137,25 @@ export default {
     const isCreatingDirectRoom = ref(false)
     const isCreatingGroupRoom = ref(false)
     const pendingDirectTargetUserId = ref('')
+    const pendingLeaveRoomId = ref('')
     const messagesContainer = ref(null)
     const users = ref([])
+    const isTyping = ref(false)
+    const remoteTypingByRoom = ref({})
+
+    let typingTimeoutId = null
+    const remoteTypingTimeouts = {}
 
     const userInfo = computed(() => authService.getUserInfo())
     const currentUserId = computed(() => userInfo.value?.sub || userInfo.value?.userId || '')
     const currentUsername = computed(
       () => userInfo.value?.username || userInfo.value?.['cognito:username'] || userInfo.value?.name || 'You'
     )
+    const activeRoomIsRemoteTyping = computed(() => {
+      const roomId = activeRoom.value?.id
+      if (!roomId) return false
+      return Boolean(remoteTypingByRoom.value[roomId])
+    })
 
     const parseUsersPayload = (payload) => {
       if (Array.isArray(payload)) return payload
@@ -166,6 +184,79 @@ export default {
           messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
         }
       })
+    }
+
+    const clearTypingTimeout = () => {
+      if (typingTimeoutId) {
+        clearTimeout(typingTimeoutId)
+        typingTimeoutId = null
+      }
+    }
+
+    const sendTypingState = (value) => {
+      if (!activeRoom.value?.id) return
+      websocketService.isTyping(activeRoom.value.id, value)
+    }
+
+    const stopTyping = () => {
+      clearTypingTimeout()
+
+      if (isTyping.value) {
+        isTyping.value = false
+        sendTypingState(false)
+      }
+    }
+
+    const clearRemoteTypingTimeout = (roomId) => {
+      if (!roomId) return
+      if (remoteTypingTimeouts[roomId]) {
+        clearTimeout(remoteTypingTimeouts[roomId])
+        delete remoteTypingTimeouts[roomId]
+      }
+    }
+
+    const setRemoteTypingState = (roomId, value) => {
+      if (!roomId) return
+
+      clearRemoteTypingTimeout(roomId)
+      remoteTypingByRoom.value = {
+        ...remoteTypingByRoom.value,
+        [roomId]: Boolean(value)
+      }
+
+      if (value) {
+        remoteTypingTimeouts[roomId] = setTimeout(() => {
+          const next = { ...remoteTypingByRoom.value }
+          next[roomId] = false
+          remoteTypingByRoom.value = next
+          delete remoteTypingTimeouts[roomId]
+        }, 2500)
+      }
+    }
+
+    const clearAllRemoteTypingTimeouts = () => {
+      Object.keys(remoteTypingTimeouts).forEach((roomId) => {
+        clearTimeout(remoteTypingTimeouts[roomId])
+        delete remoteTypingTimeouts[roomId]
+      })
+    }
+
+    const handleTyping = () => {
+      if (!activeRoom.value?.id) return
+
+      if (!isTyping.value) {
+        isTyping.value = true
+        sendTypingState(true)
+      }
+
+      clearTypingTimeout()
+      typingTimeoutId = setTimeout(() => {
+        typingTimeoutId = null
+        if (isTyping.value) {
+          isTyping.value = false
+          sendTypingState(false)
+        }
+      }, 1200)
     }
 
     const getRoomMessages = (roomId) => {
@@ -432,11 +523,23 @@ export default {
 
       const targetId = participantIds.find((id) => id !== currentUserId.value) || pendingDirectTargetUserId.value
       const targetUser = users.value.find((user) => user.userId === targetId)
+      const otherParticipant = participants.find((participant) => {
+        if (!participant || typeof participant !== 'object') return false
+        const participantId = participant.userId || participant.id || participant.sub || ''
+        return participantId && participantId !== currentUserId.value
+      })
       const roomName = isGroupRoom
         ? room?.name || room?.roomKey || 'Group chat'
-        : targetUser?.username || room?.roomKey || 'Direct chat'
+        : otherParticipant?.username || otherParticipant?.email || targetUser?.username || room?.roomKey || 'Direct chat'
 
-      if (!rooms.value.some((existingRoom) => existingRoom.id === room.roomId)) {
+      const existingRoom = rooms.value.find((existing) => existing.id === room.roomId)
+
+      if (existingRoom) {
+        existingRoom.name = roomName
+        existingRoom.type = isGroupRoom ? 'group' : 'direct'
+      }
+
+      if (!existingRoom) {
         rooms.value.unshift({
           id: room.roomId,
           name: roomName,
@@ -456,19 +559,51 @@ export default {
       selectedGroupUsers.value = []
     }
 
+    const removeRoomFromLocalState = (roomId) => {
+      if (!roomId) return
+
+      rooms.value = rooms.value.filter((existingRoom) => existingRoom.id !== roomId)
+      delete messagesByRoom.value[roomId]
+      clearRemoteTypingTimeout(roomId)
+      delete remoteTypingByRoom.value[roomId]
+
+      if (pendingLeaveRoomId.value === roomId) {
+        pendingLeaveRoomId.value = ''
+      }
+
+      if (activeRoom.value?.id === roomId) {
+        activeRoom.value = rooms.value[0] || null
+        messages.value = activeRoom.value ? [...sortRoomMessages(activeRoom.value.id)] : []
+      }
+    }
+
     const handleRoomLeftResponse = (payload) => {
       const room = payload?.room || payload
       const roomId = room?.roomId || room?.id
 
       if (!roomId) return
 
-      rooms.value = rooms.value.filter((existingRoom) => existingRoom.id !== roomId)
-      delete messagesByRoom.value[roomId]
+      const participantIds = getParticipantIds(room?.participants)
+      const didRequestLeave = pendingLeaveRoomId.value === roomId
+      const currentUserRemoved = participantIds.length > 0 && !participantIds.includes(currentUserId.value)
 
-      if (activeRoom.value?.id === roomId) {
-        activeRoom.value = rooms.value[0] || null
-        messages.value = activeRoom.value ? [...sortRoomMessages(activeRoom.value.id)] : []
+      if (!didRequestLeave && !currentUserRemoved) {
+        return
       }
+
+      removeRoomFromLocalState(roomId)
+    }
+
+    const handleRoomDeletedResponse = (payload) => {
+      const roomId =
+        payload?.room?.roomId ||
+        payload?.room?.id ||
+        payload?.roomId ||
+        payload?.deletedRoomId ||
+        payload?.id ||
+        pendingLeaveRoomId.value
+
+      removeRoomFromLocalState(roomId)
     }
 
     const handleGetRoomsResponse = (payload) => {
@@ -589,6 +724,41 @@ export default {
         }
       }
 
+      if (data && typeof data === 'object') {
+        if (
+          data.type === 'ROOM_DELETED' ||
+          data.action === 'ROOM_DELETED' ||
+          data.method === 'ROOM_DELETED' ||
+          data.type === 'roomDeleted' ||
+          data.action === 'roomDeleted' ||
+          data.method === 'roomDeleted'
+        ) {
+          handleRoomDeletedResponse(data)
+        }
+      }
+
+      if (data && typeof data === 'object') {
+        if (
+          data.type === 'USER_IS_TYPING' ||
+          data.action === 'USER_IS_TYPING' ||
+          data.method === 'USER_IS_TYPING' ||
+          data.type === 'userIsTyping' ||
+          data.action === 'userIsTyping' ||
+          data.method === 'userIsTyping'
+        ) {
+          if (data.userId && data.userId === currentUserId.value) {
+            return
+          }
+
+          const roomId = data.roomId || activeRoom.value?.id
+          if (!roomId) {
+            return
+          }
+
+          setRemoteTypingState(roomId, Boolean(data.isTyping))
+        }
+      }
+
       if (parsedUsers.length > 0) {
         users.value = parsedUsers
           .filter((user) => user.userId !== currentUserId.value)
@@ -602,6 +772,7 @@ export default {
     }
 
     const selectRoom = (room) => {
+      stopTyping()
       activeRoom.value = room
       messages.value = [...sortRoomMessages(room.id)]
       room.unreadCount = 0
@@ -610,6 +781,8 @@ export default {
     const sendMessage = () => {
       const content = messageInput.value.trim()
       if (!content || !activeRoom.value) return
+
+      stopTyping()
 
       const message = {
         id: `temp-${Date.now()}`,
@@ -645,10 +818,10 @@ export default {
     }
 
     const leaveRoom = () => {
+      stopTyping()
       if (activeRoom.value) {
+        pendingLeaveRoomId.value = activeRoom.value.id
         websocketService.leaveRoom(activeRoom.value.id)
-        activeRoom.value = null
-        messages.value = []
       }
     }
 
@@ -695,6 +868,8 @@ export default {
     })
 
     onUnmounted(() => {
+      stopTyping()
+      clearAllRemoteTypingTimeouts()
       websocketService.off('message', handleSocketMessage)
       websocketService.off('connected', handleConnected)
       websocketService.off('disconnected', handleDisconnected)
@@ -712,6 +887,7 @@ export default {
       isCreatingDirectRoom,
       messagesContainer,
       users,
+      activeRoomIsRemoteTyping,
       currentUserId,
       selectRoom,
       sendMessage,
@@ -721,6 +897,7 @@ export default {
       openDirectModal,
       openGroupModal,
       requestUsers,
+      handleTyping,
       formatTime,
       formatDeliveryStatus,
       formatLastSeen
@@ -921,6 +1098,9 @@ export default {
 .msg-text {
   margin-top: 0.2rem;
   color: #1f2a37;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .msg-time {
@@ -941,10 +1121,60 @@ export default {
 
 .composer {
   display: flex;
+  flex-direction: column;
   gap: 0.6rem;
   padding: 0.75rem;
   border-top: 1px solid #d9e1ea;
   background: #fff;
+}
+
+.typing-indicator {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: #5e6f83;
+  background: #eef3f9;
+  border: 1px solid #d6e0ec;
+  border-radius: 999px;
+  padding: 0.22rem 0.55rem;
+}
+
+.typing-dots {
+  display: inline-flex;
+  gap: 0.2rem;
+}
+
+.typing-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #6e7f93;
+  display: inline-block;
+  animation: typing-bounce 1s infinite ease-in-out;
+}
+
+.typing-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+
+  40% {
+    transform: translateY(-2px);
+    opacity: 1;
+  }
 }
 
 .composer-input {
