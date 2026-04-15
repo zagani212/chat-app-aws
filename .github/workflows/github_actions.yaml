@@ -1,0 +1,23 @@
+name: ci
+
+on:
+  push:
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      -
+        name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          registry: ${{vars.AWS_ACCOUNT_NUMBER}}.dkr.ecr.${{vars.AWS_REGION}}.amazonaws.com
+          username: ${{ vars.AWS_ACCESS_KEY_ID }}
+          password: ${{ secrets.AWS_SECRET_ACCESS_KEY  }}
+      -
+        name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: front
+          push: true
+          tags: chat-app/front:${{github.sha}}
