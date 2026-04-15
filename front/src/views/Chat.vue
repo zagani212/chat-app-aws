@@ -35,7 +35,7 @@
           <button @click="leaveRoom" class="btn btn-leave">Leave</button>
         </div>
 
-        <div class="messages" ref="messagesContainer">
+        <div class="messages" ref="messagesContainer" @scroll.passive="handleMessagesScroll">
           <div v-if="messages.length === 0" class="empty-messages">No messages yet.</div>
           <div v-for="msg in messages" :key="msg.id" :class="['msg-row', { own: msg.userId === currentUserId }]">
             <div class="msg-bubble">
@@ -80,7 +80,7 @@
               <span class="user-name">{{ user.username }}</span>
               <span :class="['status-chip', user.status === 'ONLINE' ? 'online' : 'offline']">{{ user.status }}</span>
             </div>
-            <div class="user-last-seen">Last seen: {{ formatLastSeen(user.lastSeen) }}</div>
+            <div v-if="user.status !== 'ONLINE'" class="user-last-seen">Last seen: {{ formatLastSeen(user.lastSeen) }}</div>
             <button class="btn btn-message" :disabled="isCreatingDirectRoom" @click="createDirectRoom(user)">
               {{ isCreatingDirectRoom ? 'Creating...' : 'Message' }}
             </button>
@@ -98,7 +98,8 @@
             <input type="checkbox" :value="user.userId" v-model="selectedGroupUsers" />
             <div>
               <div class="user-name">{{ user.username }}</div>
-              <div class="user-last-seen">Last seen: {{ formatLastSeen(user.lastSeen) }} - {{ user.status }}</div>
+              <div v-if="user.status !== 'ONLINE'" class="user-last-seen">Last seen: {{ formatLastSeen(user.lastSeen) }} - {{ user.status }}</div>
+              <div v-else class="user-last-seen">{{ user.status }}</div>
             </div>
           </label>
         </div>
@@ -142,8 +143,10 @@ export default {
     const users = ref([])
     const isTyping = ref(false)
     const remoteTypingByRoom = ref({})
+    const isRefreshingMessages = ref(false)
 
     let typingTimeoutId = null
+    let messageRefreshTimeoutId = null
     const remoteTypingTimeouts = {}
 
     const userInfo = computed(() => authService.getUserInfo())
@@ -151,6 +154,7 @@ export default {
     const currentUsername = computed(
       () => userInfo.value?.username || userInfo.value?.['cognito:username'] || userInfo.value?.name || 'You'
     )
+    const currentUserEmail = computed(() => userInfo.value?.email || '')
     const activeRoomIsRemoteTyping = computed(() => {
       const roomId = activeRoom.value?.id
       if (!roomId) return false
@@ -170,12 +174,37 @@ export default {
       return []
     }
 
+    const isCurrentUser = (user) => {
+      if (!user || typeof user !== 'object') return false
+
+      const candidateId = user.userId || user.id || user.sub || ''
+      const candidateUsername = user.username || ''
+      const candidateEmail = user.email || ''
+
+      if (candidateId && currentUserId.value && candidateId === currentUserId.value) return true
+      if (candidateUsername && currentUsername.value && candidateUsername === currentUsername.value) return true
+      if (candidateEmail && currentUserEmail.value && candidateEmail === currentUserEmail.value) return true
+
+      return false
+    }
+
     const requestUsers = () => {
       websocketService.listUsers()
     }
 
     const requestMessages = () => {
+      if (isRefreshingMessages.value) return
+      isRefreshingMessages.value = true
       websocketService.getMessages()
+
+      if (messageRefreshTimeoutId) {
+        clearTimeout(messageRefreshTimeoutId)
+      }
+
+      messageRefreshTimeoutId = setTimeout(() => {
+        isRefreshingMessages.value = false
+        messageRefreshTimeoutId = null
+      }, 1000)
     }
 
     const scrollToBottom = () => {
@@ -184,6 +213,15 @@ export default {
           messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
         }
       })
+    }
+
+    const handleMessagesScroll = () => {
+      const container = messagesContainer.value
+      if (!container || !activeRoom.value) return
+
+      if (container.scrollTop <= 80) {
+        requestMessages()
+      }
     }
 
     const clearTypingTimeout = () => {
@@ -477,11 +515,6 @@ export default {
         sortRoomMessages(message.roomId)
       })
 
-      if (!activeRoom.value && rooms.value.length > 0) {
-        const preferredRoom = rooms.value.find((room) => getRoomMessages(room.id).length > 0) || rooms.value[0]
-        activeRoom.value = preferredRoom
-      }
-
       if (activeRoom.value?.id) {
         syncActiveRoomMessages(activeRoom.value.id)
         scrollToBottom()
@@ -572,8 +605,8 @@ export default {
       }
 
       if (activeRoom.value?.id === roomId) {
-        activeRoom.value = rooms.value[0] || null
-        messages.value = activeRoom.value ? [...sortRoomMessages(activeRoom.value.id)] : []
+        activeRoom.value = null
+        messages.value = []
       }
     }
 
@@ -640,11 +673,6 @@ export default {
           }
         })
 
-      if (!activeRoom.value && rooms.value.length > 0) {
-        const preferredRoom = rooms.value.find((room) => getRoomMessages(room.id).length > 0) || rooms.value[0]
-        activeRoom.value = preferredRoom
-        messages.value = [...getRoomMessages(preferredRoom.id)]
-      }
     }
 
     const handleSocketMessage = (data) => {
@@ -761,7 +789,7 @@ export default {
 
       if (parsedUsers.length > 0) {
         users.value = parsedUsers
-          .filter((user) => user.userId !== currentUserId.value)
+          .filter((user) => !isCurrentUser(user))
           .map((user) => ({
             username: user.username || 'Unknown',
             lastSeen: user.lastSeen || '',
@@ -798,7 +826,11 @@ export default {
       sortRoomMessages(activeRoom.value.id)
       syncActiveRoomMessages(activeRoom.value.id)
       messageInput.value = ''
-      websocketService.sendMessage(activeRoom.value.id, content)
+      const sendResult = websocketService.sendMessage(activeRoom.value.id, content)
+      if (sendResult?.queued) {
+        message.deliveryStatus = 'queued'
+        syncActiveRoomMessages(activeRoom.value.id)
+      }
       scrollToBottom()
     }
 
@@ -843,7 +875,7 @@ export default {
     }
 
     const formatDeliveryStatus = (status) => {
-      if (status === 'pending') return '🕒'
+      if (status === 'pending' || status === 'queued') return '🕒'
       return '✓✓'
     }
 
@@ -870,6 +902,10 @@ export default {
     onUnmounted(() => {
       stopTyping()
       clearAllRemoteTypingTimeouts()
+      if (messageRefreshTimeoutId) {
+        clearTimeout(messageRefreshTimeoutId)
+        messageRefreshTimeoutId = null
+      }
       websocketService.off('message', handleSocketMessage)
       websocketService.off('connected', handleConnected)
       websocketService.off('disconnected', handleDisconnected)
@@ -987,6 +1023,7 @@ export default {
 .chat-main {
   display: flex;
   flex-direction: column;
+  min-height: 0;
   background: #f0f4f9;
 }
 
@@ -1034,6 +1071,7 @@ export default {
 .chat-wrapper {
   display: flex;
   flex-direction: column;
+  min-height: 0;
   height: 100%;
 }
 
@@ -1060,6 +1098,8 @@ export default {
 
 .messages {
   flex: 1;
+  min-height: 0;
+  max-height: calc(100vh - 260px);
   overflow-y: auto;
   padding: 1rem;
 }
