@@ -1,38 +1,32 @@
-data "archive_file" "lambda_zip" {
+data "archive_file" "from_file" {
+  count = var.source_file != null ? 1 : 0
   type        = "zip"
   source_file = var.source_file
   output_path = format("./zip/%s.zip", var.function_name)
 }
-
-resource "aws_iam_role" "lambda_exec" {
-  name = "lambda-exec-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = {
-        Service = "lambda.amazonaws.com"
-      }
-    }]
-  })
+data "archive_file" "from_dir" {
+  count = var.source_dir != null ? 1 : 0
+  type        = "zip"
+  source_dir = var.source_dir
+  output_path = format("./zip/%s.zip", var.function_name)
 }
 
-resource "aws_iam_role_policy_attachment" "basic" {
-  role       = aws_iam_role.lambda_exec.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+locals {
+  lambda_zip_path = coalesce(
+    try(data.archive_file.from_file[0], null),
+    try(data.archive_file.from_dir[0], null)
+  )
 }
 
 resource "aws_lambda_function" "my_lambda" {
   function_name = var.function_name
 
-  runtime = "nodejs18.x"
+  runtime = "nodejs24.x"
   handler = var.handler
-  layers = [var.layer_arn]
+  layers = var.layer_arn == null ? [] : [var.layer_arn]
 
-  filename         = data.archive_file.lambda_zip.output_path
-  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+  filename         = local.lambda_zip_path.output_path
+  source_code_hash = local.lambda_zip_path.output_base64sha256
 
-  role = aws_iam_role.lambda_exec.arn
+  role = var.iam_role
 }
