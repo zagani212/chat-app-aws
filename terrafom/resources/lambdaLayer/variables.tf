@@ -1,6 +1,6 @@
-variable source_file {
+variable source_dir {
   type = string
-  description = "The source file of your layer"
+  description = "The source directory of your layer"
 }
 variable layer_name {
   type = string
