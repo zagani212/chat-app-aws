@@ -18,7 +18,7 @@ data "aws_iam_policy_document" "register_new_user_permissions" {
   statement {
     sid = "1"
     actions = ["dynamodb:PutItem"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/User"]
+    resources = [var.user_table]
   }
 }
 

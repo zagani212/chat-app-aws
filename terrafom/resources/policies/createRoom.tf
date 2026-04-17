@@ -18,22 +18,22 @@ data "aws_iam_policy_document" "create_room_permissions" {
   statement {
     sid = "1"
     actions = ["dynamodb:PutItem"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/ChatRoom", "arn:aws:dynamodb:eu-west-3:775698064297:table/UserRoom"]
+    resources = [var.chat_room_table, var.user_room_table]
   }
   statement {
     sid = "2"
     actions = ["dynamodb:BatchGetItem"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/User"]
+    resources = [var.user_table]
   }
   statement {
     sid = "3"
     actions = ["dynamodb:Query", "dynamodb:GetItem"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/Connection"]
+    resources = [var.connection_table]
   }
   statement {
     sid = "4"
     actions = ["dynamodb:Query"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/Connection/index/*"]
+    resources = ["${var.connection_table}/index/*"]
   }
   statement {
     sid = "5"

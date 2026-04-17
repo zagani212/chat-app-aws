@@ -18,12 +18,12 @@ data "aws_iam_policy_document" "connection_handler_permissions" {
   statement {
     sid = "1"
     actions = ["dynamodb:PutItem", "dynamodb:Scan"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/Connection"]
+    resources = [var.connection_table]
   }
   statement {
     sid = "2"
     actions = ["dynamodb:UpdateItem"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/User"]
+    resources = [var.user_table]
   }
   statement {
     sid = "3"

@@ -18,12 +18,12 @@ data "aws_iam_policy_document" "disconnect_handler_permissions" {
   statement {
     sid = "1"
     actions = ["dynamodb:DeleteItem", "dynamodb:Scan"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/Connection"]
+    resources = [var.connection_table]
   }
   statement {
     sid = "2"
     actions = ["dynamodb:Query"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/Connection/index/GSI1"]
+    resources = ["${var.connection_table}/index/GSI1"]
   }
   statement {
     sid = "3"

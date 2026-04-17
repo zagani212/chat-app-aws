@@ -18,7 +18,7 @@ data "aws_iam_policy_document" "get_all_users_permissions" {
   statement {
     sid = "1"
     actions = ["dynamodb:Scan"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/User"]
+    resources = [var.user_table]
   }
   statement {
     sid = "3"

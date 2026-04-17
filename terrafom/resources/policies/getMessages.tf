@@ -18,12 +18,12 @@ data "aws_iam_policy_document" "get_message_permissions" {
   statement {
     sid = "1"
     actions = ["dynamodb:Query"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/UserRoom", "arn:aws:dynamodb:eu-west-3:775698064297:table/Message"]
+    resources = [var.user_room_table, var.message_table]
   }
   statement {
     sid = "2"
     actions = ["dynamodb:GetItem"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/Connection"]
+    resources = [var.connection_table]
   }
   statement {
     sid = "3"

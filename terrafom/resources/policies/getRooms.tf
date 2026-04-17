@@ -18,12 +18,12 @@ data "aws_iam_policy_document" "get_rooms_permissions" {
   statement {
     sid = "1"
     actions = ["dynamodb:GetItem"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/Connection","arn:aws:dynamodb:eu-west-3:775698064297:table/ChatRoom"]
+    resources = [var.connection_table,var.chat_room_table]
   }
   statement {
     sid = "2"
     actions = ["dynamodb:Query"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/UserRoom"]
+    resources = [var.user_room_table]
   }
   statement {
     sid = "3"

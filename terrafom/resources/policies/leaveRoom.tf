@@ -18,27 +18,27 @@ data "aws_iam_policy_document" "leave_room_permissions" {
   statement {
     sid = "1"
     actions = ["dynamodb:GetItem"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/Connection"]
+    resources = [var.connection_table]
   }
   statement {
     sid = "2"
     actions = ["dynamodb:Query"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/Message", "arn:aws:dynamodb:eu-west-3:775698064297:table/ChatRoom/index/GSI1","arn:aws:dynamodb:eu-west-3:775698064297:table/Connection/index/GSI1"]
+    resources = [var.message_table, "${var.chat_room_table}/index/GSI1","${var.connection_table}/index/GSI1"]
   }
   statement {
     sid = "3"
     actions = ["dynamodb:BatchWriteItem"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/Message"]
+    resources = [var.message_table]
   }
   statement {
     sid = "4"
     actions = ["dynamodb:DeleteItem", "dynamodb:PutItem"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/ChatRoom"]
+    resources = [var.chat_room_table]
   }
   statement {
     sid = "5"
     actions = ["dynamodb:DeleteItem"]
-    resources = ["arn:aws:dynamodb:eu-west-3:775698064297:table/UserRoom"]
+    resources = [var.user_room_table]
   }
   statement {
     sid = "6"
