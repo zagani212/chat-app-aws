@@ -5,3 +5,5 @@ terraform.tfstate*
 zip/
 
 variables.auto.tfvars
+variables.auto.tfvars
+*.auto.tfvars

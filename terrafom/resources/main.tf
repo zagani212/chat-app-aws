@@ -24,6 +24,8 @@ module "iam_role" {
   message_table = module.dynamodb.message_table
   user_table = module.dynamodb.user_table
   user_room_table = module.dynamodb.user_room_table
+
+  apigw_execution_arn = module.api_gateway.execution_arn
 }
 
 module "GetRooms" {
@@ -54,6 +56,11 @@ module "ConnectionHandler" {
   iam_role = module.iam_role.connection_handler_role
   layer_arn = module.lambda_layer.layer_arn
   handler = "index.handler"
+
+  env_variables = {
+    CLIENT_ID = module.cognito.client_id
+    USER_POOL_ID   = module.cognito.user_pool_id
+  }
 }
 
 module "isTyping" {
@@ -110,7 +117,7 @@ module "SendMessage" {
 
   source_file = "../../backend/SendMessage.mjs"
   function_name = "SendMessage"
-  iam_role = module.iam_role.leave_room_role
+  iam_role = module.iam_role.send_message_role
   layer_arn = module.lambda_layer.layer_arn
   handler = "SendMessage.handler"
 }
@@ -127,4 +134,34 @@ module "GetAllUsers" {
 
 module "dynamodb" {
   source = "./dynamodb"
+}
+
+module "api_gateway" {
+  source = "./apiGateway"
+
+  connect = module.ConnectionHandler.arn
+  disconnect = module.DisconnectHandler.arn
+  create_room = module.CreateRoom.arn
+  get_messages = module.GetMessages.arn
+  get_rooms = module.GetRooms.arn
+  is_typing = module.isTyping.arn
+  leave_room = module.LeaveRoom.arn
+  list_users = module.GetAllUsers.arn
+  send_messages = module.SendMessage.arn
+}
+
+module "cognito" {
+  source = "./cognito"
+
+  client_id = var.client_id
+  client_secret = var.client_secret
+}
+
+module "ecr" {
+  source = "./ecr"
+}
+
+module "ecs" {
+  source = "./ecs"
+  image = var.image
 }
