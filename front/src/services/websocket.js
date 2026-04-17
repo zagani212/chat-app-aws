@@ -3,7 +3,7 @@ import authService from './auth'
 class WebSocketService {
   constructor() {
     this.ws = null
-    this.url = 'wss://xizfuecqnl.execute-api.eu-west-3.amazonaws.com/dev/'
+    this.url = import.meta.env.VITE_WS_URL || ''
     this.userId = null
     this.reconnectAttempts = 0
     this.maxReconnectAttempts = 5
@@ -19,7 +19,6 @@ class WebSocketService {
       if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return
       this.connect(this.userId).catch(console.error)
     }
-
     if (typeof window !== 'undefined') {
       window.addEventListener('online', this.handleBrowserOnline)
     }
@@ -111,6 +110,10 @@ class WebSocketService {
   }
 
   connect(userId) {
+    if (!this.url) {
+      return Promise.reject(new Error('Missing VITE_WS_URL environment variable'))
+    }
+
     if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
       this.closeCurrentSocket()
     }
