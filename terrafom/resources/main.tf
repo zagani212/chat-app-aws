@@ -18,6 +18,12 @@ module "lambda_layer" {
 
 module "iam_role" {
   source = "./policies"
+  
+  chat_room_table = module.dynamodb.chat_room_table
+  connection_table = module.dynamodb.connection_table
+  message_table = module.dynamodb.message_table
+  user_table = module.dynamodb.user_table
+  user_room_table = module.dynamodb.user_room_table
 }
 
 module "GetRooms" {
@@ -117,4 +123,8 @@ module "GetAllUsers" {
   iam_role = module.iam_role.get_all_users_role
   layer_arn = module.lambda_layer.layer_arn
   handler = "GetAllUsers.handler"
+}
+
+module "dynamodb" {
+  source = "./dynamodb"
 }
