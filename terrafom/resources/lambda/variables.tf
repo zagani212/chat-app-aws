@@ -41,3 +41,9 @@ variable handler {
   type = string
   description = "The handler of the function"
 }
+
+variable env_variables {
+  type = map
+  description = "env variables"
+  default = {}
+}

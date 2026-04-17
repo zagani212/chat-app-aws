@@ -28,5 +28,9 @@ resource "aws_lambda_function" "my_lambda" {
   filename         = local.lambda_zip_path.output_path
   source_code_hash = local.lambda_zip_path.output_base64sha256
 
+  environment {
+    variables = var.env_variables
+  }
+
   role = var.iam_role
 }
