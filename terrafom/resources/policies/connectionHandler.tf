@@ -28,8 +28,16 @@ data "aws_iam_policy_document" "connection_handler_permissions" {
   statement {
     sid = "3"
     actions = ["execute-api:ManageConnections"]
-    resources = ["arn:aws:execute-api:eu-west-3:775698064297:xizfuecqnl/*"]
+    resources = ["${var.apigw_execution_arn}/*/*/@connections/*"]
   }
+}
+
+resource "aws_lambda_permission" "connection_handler_allow_apigw" {
+  action        = "lambda:InvokeFunction"
+  function_name = "ConnectionHandler"
+  principal     = "apigateway.amazonaws.com"
+
+  source_arn = "${var.apigw_execution_arn}/*/*"
 }
 
 resource "aws_iam_role_policy_attachment" "connection_handler_policy_attachement" {

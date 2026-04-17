@@ -30,6 +30,10 @@ output "leave_room_role" {
   value = aws_iam_role.leave_room_role.arn
 }
 
+output "send_message_role" {
+  value = aws_iam_role.send_message_role.arn
+}
+
 output "get_all_users_role" {
   value = aws_iam_role.get_all_users_role.arn
 }

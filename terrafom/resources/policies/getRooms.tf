@@ -13,7 +13,7 @@ data "aws_iam_policy_document" "get_rooms_trust" {
     }
   }
 }
-#Add Permissions
+# Add Permissions
 data "aws_iam_policy_document" "get_rooms_permissions" {
   statement {
     sid = "1"
@@ -28,8 +28,17 @@ data "aws_iam_policy_document" "get_rooms_permissions" {
   statement {
     sid = "3"
     actions = ["execute-api:ManageConnections"]
-    resources = ["arn:aws:execute-api:eu-west-3:775698064297:xizfuecqnl/*"]
+    resources = ["${var.apigw_execution_arn}/*/*/@connections/*"]
   }
+}
+
+resource "aws_lambda_permission" "get_rooms_allow_apigw" {
+  statement_id  = "AllowExecutionFromAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = "GetRooms"
+  principal     = "apigateway.amazonaws.com"
+
+  source_arn = "${var.apigw_execution_arn}/*"
 }
 
 resource "aws_iam_role_policy_attachment" "get_rooms_policy_attachement" {

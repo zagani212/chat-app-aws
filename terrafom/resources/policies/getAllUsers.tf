@@ -23,8 +23,16 @@ data "aws_iam_policy_document" "get_all_users_permissions" {
   statement {
     sid = "3"
     actions = ["execute-api:ManageConnections"]
-    resources = ["arn:aws:execute-api:eu-west-3:775698064297:xizfuecqnl/*"]
+    resources = ["${var.apigw_execution_arn}/*/*/@connections/*"]
   }
+}
+
+resource "aws_lambda_permission" "get_all_users_allow_apigw" {
+  action        = "lambda:InvokeFunction"
+  function_name = "GetAllUsers"
+  principal     = "apigateway.amazonaws.com"
+
+  source_arn = "${var.apigw_execution_arn}/*/*"
 }
 
 resource "aws_iam_role_policy_attachment" "get_all_users_policy_attachement" {

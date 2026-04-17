@@ -43,8 +43,17 @@ data "aws_iam_policy_document" "leave_room_permissions" {
   statement {
     sid = "6"
     actions = ["execute-api:ManageConnections"]
-    resources = ["arn:aws:execute-api:eu-west-3:775698064297:xizfuecqnl/*"]
+    resources = ["${var.apigw_execution_arn}/*/*/@connections/*"]
   }
+}
+
+resource "aws_lambda_permission" "leave_room_allow_apigw" {
+  statement_id  = "AllowExecutionFromAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = "LeaveRoom"
+  principal     = "apigateway.amazonaws.com"
+
+  source_arn = "${var.apigw_execution_arn}/*"
 }
 
 resource "aws_iam_role_policy_attachment" "leave_room_policy_attachement" {
