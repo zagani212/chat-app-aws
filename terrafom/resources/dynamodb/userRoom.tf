@@ -6,6 +6,15 @@ resource "aws_dynamodb_table" "user_room_table" {
   hash_key  = "userId"
   range_key = "roomKey"
 
+  attribute {
+    name = "userId"
+    type = "S"
+  }
+  attribute {
+    name = "roomKey"
+    type = "S"
+  }  
+
   tags = {
     Name        = "userRoom"
   }
