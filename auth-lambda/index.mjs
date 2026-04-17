@@ -10,12 +10,13 @@ const client = new DynamoDBClient({ region: process.env.AWS_REGION });
 const dynamo = DynamoDBDocumentClient.from(client);
 
 export const handler = async (event) => {
+    console.log("1")
     try {
         const token = event.queryStringParameters?.token;
         if (!token) {
             return { statusCode: 401 };
         }
-
+        console.log("2")
         const verifier = CognitoJwtVerifier.create({
             userPoolId: process.env.USER_POOL_ID,
             tokenUse: "access",
@@ -23,7 +24,7 @@ export const handler = async (event) => {
         });
 
         const payload = await verifier.verify(token);
-
+        console.log("3")
         await dynamo.send(
             new PutCommand({
                 TableName: "Connection",
@@ -34,6 +35,7 @@ export const handler = async (event) => {
                 }
             })
         );
+        console.log("4")
         await dynamo.send(
             new UpdateCommand({
                 TableName: "User",
@@ -52,7 +54,7 @@ export const handler = async (event) => {
                 TableName: "Connection"
             })
         );
-
+        console.log("5")
         const apiClient = createApiClient(event);
         
         await Promise.all(
