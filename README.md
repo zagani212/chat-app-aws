@@ -23,6 +23,10 @@ This project provides a production-style chat system with:
 - ECR repository for frontend images
 - Terraform manages all AWS resources
 
+Architecture diagram:
+
+![AWS Chat App Architecture](images/image.png)
+
 Flow:
 1. User signs in through Cognito hosted UI.
 2. Frontend exchanges auth code for access/id tokens.
